@@ -1,28 +1,19 @@
 import streamlit as st
 import google.generativeai as genai
-import os
-from dotenv import load_dotenv
 
-load_dotenv()
-api_key = os.getenv("AIzaSyDou_lfKmdoC19dqpolzGY6EY7eUskkgUI")
-genai.configure(api_key=api_key)
+# Step 1: Configure Gemini API directly (⚠️ Hardcoded for simplicity)
+API_KEY = "AIzaSyDou_lfKmdoC19dqpolzGY6EY7eUskkgUI"  # Replace with your actual Gemini API key
+genai.configure(api_key=API_KEY)
 
-model = genai.GenerativeModel("gemini-pro")
+# Step 2: Define the model
+model = genai.GenerativeModel("gemini-1.5-flash")
 
-st.title("🎬 Gemini Transcript Highlighter")
-st.write("Extract 3–5 engaging video moments for reels.")
+# Step 3: Streamlit App UI
+st.title("🎬 Transcript to Reels - Highlight Generator")
+st.write("Paste your video transcript below. We'll extract the top 3–5 moments for social media reels!")
 
-transcript_input = st.text_area("📜 Paste the transcript here:", height=300)
-
-if st.button("✨ Generate Highlights"):
-    if not transcript_input.strip():
-        st.error("Please paste a transcript.")
-    else:
-        with st.spinner("Analyzing..."):
-            prompt = f"""
-            You are analyzing a video transcript. Identify the top 3–5 most engaging or insightful moments with their timestamps.
-            Output format:
-            [0.00s - 24.88s]:  When I was a kid, the disaster we worried about most was a nuclear war. That's why we had
+transcript = st.text_area("📄 Transcript with Timestamps", height=300, placeholder="""
+[0.00s - 24.88s]:  When I was a kid, the disaster we worried about most was a nuclear war. That's why we had
 [24.88s - 30.92s]:  a barrel like this down in our basement filled with cans of food and water. When the nuclear
 [30.92s - 37.94s]:  attack came, we were supposed to go down stairs, hunker down and eat out of that barrel.
 [37.94s - 45.72s]:  Today the greatest risk of global catastrophe doesn't look like this. Instead, it looks like
@@ -62,10 +53,23 @@ if st.button("✨ Generate Highlights"):
 [282.72s - 290.72s]:  of a virus spread through the air like the Spanish flu back in 1918. So here's what would happen.
 [291.28s - 297.12s]:  It would spread throughout the world very, very quickly. And you can see there's over 30 million
 [297.12s - 300.16s]:  people die from that epidemic.
-            """
-            try:
-                response = model.generate_content(prompt)
-                st.success("Done! 🎉")
-                st.markdown(response.text)
-            except Exception as e:
-                st.error(f"Error: {e}")
+""")
+
+if st.button("✨ Generate Reel Segments"):
+    with st.spinner("Analyzing transcript with Gemini..."):
+        prompt = f"""
+You are analyzing a video transcript. Identify the top 3–5 most engaging or insightful moments with their timestamps.
+
+Output format:
+1. [start_time] - [end_time]: [summary of event]
+
+Transcript:
+{transcript}
+        """
+
+        try:
+            response = model.generate_content(prompt)
+            st.subheader("🎯 Top Moments for Reels")
+            st.markdown(response.text)
+        except Exception as e:
+            st.error(f"Error: {e}")
