@@ -80,7 +80,6 @@ if st.button("✂️ Cut Reels"):
             temp_output_dir = os.path.join(tmpdir, "clips")
             os.makedirs(temp_output_dir, exist_ok=True)
 
-            # Create permanent output folder
             final_output_dir = "saved_reels"
             os.makedirs(final_output_dir, exist_ok=True)
 
@@ -91,25 +90,42 @@ if st.button("✂️ Cut Reels"):
                     if not lines or "-" not in lines[0]:
                         continue
                     time_line = lines[0]
-                    start_time, end_time = [x.strip(" []s") for x in time_line.split("-")]
-                    summary = "\n".join(lines[1:]).strip()
+                    start_time_raw, end_time_raw = [x.strip(" []s") for x in time_line.split("-")]
 
+                    # ✅ Sanitize time to HH:MM:SS
+                    def sanitize(ts):
+                        parts = ts.split(":")
+                        if len(parts) == 1:
+                            return f"00:00:{parts[0].zfill(2)}"
+                        elif len(parts) == 2:
+                            return f"00:{parts[0].zfill(2)}:{parts[1].zfill(2)}"
+                        elif len(parts) == 3:
+                            return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{parts[2].zfill(2)}"
+                        else:
+                            return ts
+                    start_time = sanitize(start_time_raw)
+                    end_time = sanitize(end_time_raw)
+
+                    summary = "\n".join(lines[1:]).strip()
                     output_filename = f"reel_{i+1}.mp4"
                     temp_path = os.path.join(temp_output_dir, output_filename)
                     final_path = os.path.join(final_output_dir, output_filename)
 
-                    # FFmpeg cut
                     cmd = [
-                        "ffmpeg", "-i", input_path,
+                        "ffmpeg", "-y", "-i", input_path,
                         "-ss", start_time, "-to", end_time,
                         "-vf", "scale=720:1280,setsar=1",
                         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                         "-c:a", "aac", "-b:a", "128k",
                         temp_path
                     ]
-                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                    # Copy to stable path
+                    if not os.path.exists(temp_path):
+                        st.error(f"❌ FFmpeg failed for block {i+1}. Command:\n`{' '.join(cmd)}`\n\nError:\n{result.stderr.decode()}")
+                        continue
+
+                    # Copy to stable folder
                     with open(temp_path, "rb") as src, open(final_path, "wb") as dst:
                         dst.write(src.read())
 
@@ -117,7 +133,6 @@ if st.button("✂️ Cut Reels"):
                 except Exception as e:
                     st.error(f"Block {i+1} failed: {e}")
 
-        # Show all reels
         if reels:
             st.success(f"🎉 {len(reels)} reels generated!")
             for name, path, desc in reels:
@@ -129,6 +144,7 @@ if st.button("✂️ Cut Reels"):
             st.warning("No valid reels generated.")
     else:
         st.warning("Please transcribe and generate top segments first.")
+
 
 # --- FOOTER ---
 st.markdown("---")
