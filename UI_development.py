@@ -1,95 +1,102 @@
 import streamlit as st
 import google.generativeai as genai
-import os
 import tempfile
 import subprocess
+import os
+import whisper
 
 # --- CONFIGURE GEMINI ---
 API_KEY = "YOUR_API_KEY"  # 🔁 Replace with your Gemini API key
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="🎬 AI Reels Extractor", layout="centered")
 st.title("🎞️ AI-Powered Reels Extractor")
-st.markdown("Upload a transcript & video. Let AI find reel-worthy segments and generate clips ≤ 30s!")
+st.markdown("Upload a video. We'll transcribe it, find top 3 best moments (≤30s), and generate reels!")
 
-# --- INPUT SECTION ---
-col1, col2 = st.columns(2)
-with col1:
-    transcript = st.text_area("📄 Paste Transcript (with timestamps)", height=300,
-        placeholder="e.g.\n00:01:20 --> The speaker gives a powerful quote...\n00:02:10 --> Another great moment...")
+# --- UPLOAD VIDEO ---
+video_file = st.file_uploader("📹 Upload Video/Audio", type=["mp4", "mov", "avi", "mkv", "mp3", "wav"])
+if video_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+        tmp.write(video_file.read())
+        tmp.flush()
+        video_path = tmp.name
 
-with col2:
-    video_file = st.file_uploader("📹 Upload Video", type=["mp4", "mov", "avi"])
+# --- TRANSCRIBE USING WHISPER ---
+if st.button("📝 Transcribe & Analyze"):
+    if video_file:
+        st.info("🔊 Transcribing with Whisper...")
+        whisper_model = whisper.load_model("base")
+        result = whisper_model.transcribe(video_path, verbose=False)
+        segments = result["segments"]
 
-# --- GEMINI ANALYSIS ---
-if st.button("🧠 Analyze Transcript"):
-    if transcript.strip():
-        with st.spinner("Gemini is selecting reel-worthy moments..."):
-            prompt = f"""
+        # Format transcript with timestamps
+        transcript_with_timestamps = ""
+        for seg in segments:
+            start = seg["start"]
+            end = seg["end"]
+            text = seg["text"].strip()
+            transcript_with_timestamps += f"{start:.2f} --> {end:.2f}: {text}\n"
+
+        st.subheader("📄 Full Transcript with Timestamps")
+        st.text_area("Transcript", transcript_with_timestamps, height=300)
+
+        # --- GEMINI ANALYSIS ---
+        st.info("🧠 Gemini is selecting reel-worthy moments...")
+        gemini_prompt = f"""
 You are analyzing a video transcript with timestamps. Your task is to:
 
-1. Identify the **top 3–5 most engaging or insightful segments**.
-2. Use the **exact sentences** from the transcript (do not paraphrase).
-3. You can group consecutive lines if their total duration is **30 seconds or less**.
-4. If possible, try to select emotionally impactful, motivational, or key takeaway moments.
+1. Identify the **top 3 most engaging or insightful segments**.
+2. Use the **exact sentences** from the transcript (no paraphrasing).
+3. You can group consecutive lines if their **total duration is ≤ 30 seconds**.
+4. Prioritize emotionally impactful, motivational, or insightful quotes.
 
 Output format:
-1. [start_time] - [end_time]:
-   [exact line 1]
-   [exact line 2] (if grouped)
+[start_time] - [end_time]: 
+   [line 1]
+   [line 2] (optional, if grouped)
 
 Transcript:
-{transcript}
+{transcript_with_timestamps}
 """
-            try:
-                response = model.generate_content(prompt)
-                refined_timestamps = response.text
-                st.subheader("📌 Gemini-Selected Timestamps")
-                st.code(refined_timestamps, language="text")
-                st.session_state["timestamps"] = refined_timestamps  # save for reuse
-            except Exception as e:
-                st.error(f"❌ Gemini error: {e}")
+        try:
+            gemini_response = gemini_model.generate_content(gemini_prompt)
+            selected_segments = gemini_response.text
+            st.session_state["segments"] = selected_segments
+
+            st.subheader("✅ Top Moments (from Gemini)")
+            st.code(selected_segments, language="text")
+        except Exception as e:
+            st.error(f"Gemini error: {e}")
     else:
-        st.warning("Please paste a transcript.")
+        st.warning("Please upload a video file.")
 
-# --- VIDEO CUTTING ---
-if st.button("✂️ Cut Video into Reels"):
-    if video_file and "timestamps" in st.session_state:
-        timestamps_input = st.session_state["timestamps"]
-
+# --- CUT REELS USING FFMPEG ---
+if st.button("✂️ Cut Reels"):
+    if "segments" in st.session_state and video_file:
         with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = os.path.join(tmpdir, video_file.name)
-            output_dir = os.path.join(tmpdir, "reels")
+            input_path = video_path
+            output_dir = os.path.join(tmpdir, "clips")
             os.makedirs(output_dir, exist_ok=True)
 
-            # Save uploaded video
-            with open(input_path, "wb") as f:
-                f.write(video_file.read())
-
-            st.success("Video uploaded and timestamps received!")
-
-            # Parse and cut reels
             reels = []
-            for i, block in enumerate(timestamps_input.strip().split("\n\n")):
+            for i, block in enumerate(st.session_state["segments"].strip().split("\n\n")):
                 try:
                     lines = block.strip().split("\n")
                     if not lines or "-" not in lines[0]:
                         continue
-
                     time_line = lines[0]
-                    start_time, end_time = [x.strip(" []") for x in time_line.split("-")]
+                    start_time, end_time = [x.strip(" []s") for x in time_line.split("-")]
                     summary = "\n".join(lines[1:]).strip()
 
                     output_filename = f"reel_{i+1}.mp4"
                     output_path = os.path.join(output_dir, output_filename)
 
-                    # FFmpeg command to cut and resize
+                    # FFmpeg cut
                     cmd = [
                         "ffmpeg", "-i", input_path,
-                        "-ss", start_time,
-                        "-to", end_time,
+                        "-ss", start_time, "-to", end_time,
                         "-vf", "scale=720:1280,setsar=1",
                         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                         "-c:a", "aac", "-b:a", "128k",
@@ -97,23 +104,22 @@ if st.button("✂️ Cut Video into Reels"):
                     ]
                     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     reels.append((output_filename, output_path, summary))
-
                 except Exception as e:
-                    st.error(f"Error in block {i+1}: {block}\n\n{e}")
+                    st.error(f"Block {i+1} failed: {e}")
 
-            # Show results
+            # Display clips
             if reels:
-                st.success(f"🎉 Generated {len(reels)} reels!")
+                st.success(f"🎉 {len(reels)} reels generated!")
                 for name, path, desc in reels:
                     st.video(path)
-                    with open(path, "rb") as vid:
-                        st.download_button("⬇️ Download", vid, file_name=name)
+                    with open(path, "rb") as f:
+                        st.download_button(f"⬇️ Download {name}", f, file_name=name)
                     st.caption(desc)
             else:
-                st.warning("❌ No valid reels generated.")
+                st.warning("No valid reels generated.")
     else:
-        st.error("Upload a video and generate timestamps first.")
+        st.warning("Please transcribe and generate top segments first.")
 
 # --- FOOTER ---
 st.markdown("---")
-st.caption("Built with ❤️ using Streamlit, Google Gemini, and FFmpeg.")
+st.caption("Built with ❤️ using Whisper, Gemini, and FFmpeg.")
