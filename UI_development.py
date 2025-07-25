@@ -6,7 +6,7 @@ import os
 import whisper
 
 # --- CONFIGURE GEMINI ---
-API_KEY = "YOUR_API_KEY"  # 🔁 Replace with your Gemini API key
+API_KEY = "AIzaSyDuiPg8TvjH7FinQLiz599b4kId4LkbPCQ"  # 🔁 Replace with your Gemini API key
 genai.configure(api_key=API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
