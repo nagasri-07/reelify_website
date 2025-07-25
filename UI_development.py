@@ -77,8 +77,12 @@ if st.button("✂️ Cut Reels"):
     if "segments" in st.session_state and video_file:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = video_path
-            output_dir = os.path.join(tmpdir, "clips")
-            os.makedirs(output_dir, exist_ok=True)
+            temp_output_dir = os.path.join(tmpdir, "clips")
+            os.makedirs(temp_output_dir, exist_ok=True)
+
+            # Create permanent output folder
+            final_output_dir = "saved_reels"
+            os.makedirs(final_output_dir, exist_ok=True)
 
             reels = []
             for i, block in enumerate(st.session_state["segments"].strip().split("\n\n")):
@@ -91,7 +95,8 @@ if st.button("✂️ Cut Reels"):
                     summary = "\n".join(lines[1:]).strip()
 
                     output_filename = f"reel_{i+1}.mp4"
-                    output_path = os.path.join(output_dir, output_filename)
+                    temp_path = os.path.join(temp_output_dir, output_filename)
+                    final_path = os.path.join(final_output_dir, output_filename)
 
                     # FFmpeg cut
                     cmd = [
@@ -100,23 +105,28 @@ if st.button("✂️ Cut Reels"):
                         "-vf", "scale=720:1280,setsar=1",
                         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                         "-c:a", "aac", "-b:a", "128k",
-                        output_path
+                        temp_path
                     ]
                     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    reels.append((output_filename, output_path, summary))
+
+                    # Copy to stable path
+                    with open(temp_path, "rb") as src, open(final_path, "wb") as dst:
+                        dst.write(src.read())
+
+                    reels.append((output_filename, final_path, summary))
                 except Exception as e:
                     st.error(f"Block {i+1} failed: {e}")
 
-            # Display clips
-            if reels:
-                st.success(f"🎉 {len(reels)} reels generated!")
-                for name, path, desc in reels:
-                    st.video(path)
-                    with open(path, "rb") as f:
-                        st.download_button(f"⬇️ Download {name}", f, file_name=name)
-                    st.caption(desc)
-            else:
-                st.warning("No valid reels generated.")
+        # Show all reels
+        if reels:
+            st.success(f"🎉 {len(reels)} reels generated!")
+            for name, path, desc in reels:
+                st.video(path)
+                with open(path, "rb") as f:
+                    st.download_button(f"⬇️ Download {name}", f, file_name=name)
+                st.caption(desc)
+        else:
+            st.warning("No valid reels generated.")
     else:
         st.warning("Please transcribe and generate top segments first.")
 
