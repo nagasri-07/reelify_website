@@ -4,6 +4,7 @@ import tempfile
 import subprocess
 import os
 import whisper
+import re
 
 # --- CONFIGURE GEMINI ---
 API_KEY = "AIzaSyDuiPg8TvjH7FinQLiz599b4kId4LkbPCQ"
@@ -13,7 +14,7 @@ gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 # --- PAGE SETUP ---
 st.set_page_config(page_title="🎬 AI Reels Extractor", layout="centered")
 st.title("🎞️ AI-Powered Reels Extractor")
-st.markdown("Upload a video. We’ll transcribe it, find top 3 best moments (≤30s), and generate reels!")
+st.markdown("Upload a video. We'll transcribe it, find top 3 best moments (≤30s), and generate reels!")
 
 # --- UPLOAD VIDEO ---
 video_file = st.file_uploader("📹 Upload Video/Audio", type=["mp4", "mov", "avi", "mkv", "mp3", "wav"])
@@ -31,47 +32,80 @@ if st.button("📝 Transcribe & Analyze"):
         result = whisper_model.transcribe(video_path, verbose=False)
         segments = result["segments"]
 
+        # Format transcript with timestamps
         transcript_with_timestamps = ""
         for seg in segments:
             start = seg["start"]
             end = seg["end"]
             text = seg["text"].strip()
-            transcript_with_timestamps += f"[{start:.2f}] - [{end:.2f}]: {text}\n"
+            transcript_with_timestamps += f"{start:.2f} --> {end:.2f}: {text}\n"
 
-        st.subheader("📄 Full Transcript")
+        st.subheader("📄 Full Transcript with Timestamps")
         st.text_area("Transcript", transcript_with_timestamps, height=300)
 
         # --- GEMINI ANALYSIS ---
         st.info("🧠 Gemini is selecting reel-worthy moments...")
         gemini_prompt = f"""
-You are analyzing a video transcript. Your task is to:
+You are analyzing a video transcript with timestamps. Your task is to:
 
 1. Identify the **top 3 most engaging or insightful segments**.
-2. Use the **exact lines** from the transcript (no rephrasing).
-3. Each segment must be ≤ 30 seconds.
-4. Use this exact format for output:
+2. Use the **exact sentences** from the transcript (no paraphrasing).
+3. You can group consecutive lines if their **total duration is ≤ 30 seconds**.
+4. Prioritize emotionally impactful, motivational, or insightful quotes.
 
-[HH:MM.SS] - [HH:MM.SS]:
-<text>
-
-Example:
-[00:15.00] - [00:30.00]:
-A powerful statement about climate change.
+Output format:
+[start_time] - [end_time]: 
+   [line 1]
+   [line 2] (optional)
 
 Transcript:
 {transcript_with_timestamps}
 """
+
         try:
             gemini_response = gemini_model.generate_content(gemini_prompt)
-            selected_segments = gemini_response.text.strip()
+            selected_segments_raw = gemini_response.text
+
+            # --- FORMAT TIMESTAMPS + ENFORCE MAX 30s ---
+            def normalize_and_filter(text):
+                blocks = text.strip().split("\n\n")
+                new_blocks = []
+
+                for block in blocks:
+                    lines = block.strip().split("\n")
+                    if not lines or "-" not in lines[0]:
+                        continue
+
+                    match = re.match(r"\[?(\d+\.?\d*)\]?\s*-\s*\[?(\d+\.?\d*)\]?:", lines[0])
+                    if not match:
+                        continue
+
+                    start = float(match.group(1))
+                    end = float(match.group(2))
+
+                    if end - start > 30.0:
+                        continue  # Skip if duration > 30 seconds
+
+                    def fmt(seconds):
+                        m, s = divmod(seconds, 60)
+                        return f"[{int(m):02d}:{s:05.2f}]"
+
+                    header = f"{fmt(start)} - {fmt(end)}:"
+                    body = "\n".join(lines[1:])
+                    new_blocks.append(f"{header}\n{body}")
+
+                return "\n\n".join(new_blocks)
+
+            selected_segments = normalize_and_filter(selected_segments_raw)
             st.session_state["segments"] = selected_segments
 
-            st.subheader("✅ Top Moments (Gemini)")
+            st.subheader("✅ Top Moments (from Gemini)")
             st.code(selected_segments, language="text")
+
         except Exception as e:
             st.error(f"Gemini error: {e}")
     else:
-        st.warning("Please upload a video file first.")
+        st.warning("Please upload a video file.")
 
 # --- CUT REELS USING FFMPEG ---
 if st.button("✂️ Cut Reels"):
@@ -91,25 +125,25 @@ if st.button("✂️ Cut Reels"):
                     if not lines or "-" not in lines[0]:
                         continue
                     time_line = lines[0]
-                    start_time_raw, end_time_raw = [x.strip(" []") for x in time_line.split("-")]
+                    match = re.match(r"\[(\d+):(\d+\.\d+)\] - \[(\d+):(\d+\.\d+)\]:", time_line)
+                    if not match:
+                        continue
 
-                    # ⏱ Convert MM.SS or HH:MM.SS -> HH:MM:SS
-                    def sanitize(ts):
-                        if "." in ts:
-                            mins_secs = ts.split(".")
-                            if len(mins_secs) == 2:
-                                return f"00:{mins_secs[0].zfill(2)}:{mins_secs[1].zfill(2)}"
-                        parts = ts.split(":")
-                        if len(parts) == 2:
-                            return f"00:{parts[0].zfill(2)}:{parts[1].zfill(2)}"
-                        elif len(parts) == 3:
-                            return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{parts[2].zfill(2)}"
-                        return ts
+                    start = int(match.group(1)) * 60 + float(match.group(2))
+                    end = int(match.group(3)) * 60 + float(match.group(4))
 
-                    start_time = sanitize(start_time_raw)
-                    end_time = sanitize(end_time_raw)
+                    if end - start > 30.0:
+                        continue
+
+                    def fmt(t):  # Format for ffmpeg (HH:MM:SS.ss)
+                        m, s = divmod(t, 60)
+                        h, m = divmod(int(m), 60)
+                        return f"{h:02d}:{m:02d}:{s:05.2f}"
+
+                    start_time = fmt(start)
+                    end_time = fmt(end)
+
                     summary = "\n".join(lines[1:]).strip()
-
                     output_filename = f"reel_{i+1}.mp4"
                     temp_path = os.path.join(temp_output_dir, output_filename)
                     final_path = os.path.join(final_output_dir, output_filename)
@@ -125,10 +159,10 @@ if st.button("✂️ Cut Reels"):
                     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                     if not os.path.exists(temp_path):
-                        st.error(f"❌ FFmpeg failed for Block {i+1}. Command:\n`{' '.join(cmd)}`\n\nError:\n{result.stderr.decode()}")
+                        st.error(f"❌ FFmpeg failed for block {i+1}. Command:\n`{' '.join(cmd)}`\n\nError:\n{result.stderr.decode()}")
                         continue
 
-                    # Save to permanent path
+                    # Copy to stable folder
                     with open(temp_path, "rb") as src, open(final_path, "wb") as dst:
                         dst.write(src.read())
 
