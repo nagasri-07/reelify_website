@@ -3,3 +3,6 @@ google-generativeai==0.3.2
 moviepy
 ffmpeg-python
 openai-whisper
+streamlit
+bcrypt
+psycopg2-binary
