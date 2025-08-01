@@ -14,16 +14,22 @@ genai.configure(api_key=API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
 # --- Cached DB Connection ---
+# --- Cached DB Connection with Error Handling ---
 @st.cache_resource(show_spinner=False)
 def get_connection():
-    return psycopg2.connect(
-        dbname="neondb",
-        user="neondb_owner",
-        password="npg_Rpc87HaPXQAt",
-        host="ep-rapid-rain-a195g7cp-pooler.ap-southeast-1.aws.neon.tech",
-        port="5432",
-        sslmode="require"
-    )
+    try:
+        return psycopg2.connect(
+            dbname="neondb",
+            user="neondb_owner",
+            password="npg_Rpc87HaPXQAt",
+            host="ep-rapid-rain-a195g7cp-pooler.ap-southeast-1.aws.neon.tech",
+            port="5432",
+            sslmode="require"
+        )
+    except psycopg2.OperationalError as e:
+        st.error("❌ Database connection failed. Please check your internet or credentials.")
+        raise e
+
 
 # --- Create Users Table ---
 def create_users_table():
