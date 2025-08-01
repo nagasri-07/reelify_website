@@ -15,7 +15,7 @@ gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
 # --- Cached DB Connection ---
 # --- Cached DB Connection with Error Handling ---
-@st.cache_resource(show_spinner=False)
+#@st.cache_resource(show_spinner=False)
 def get_connection():
     try:
         return psycopg2.connect(
