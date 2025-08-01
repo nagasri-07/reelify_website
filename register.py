@@ -112,7 +112,7 @@ elif menu == "Login":
         if login_user(email, password):
             st.session_state['user'] = email
             st.success("Logged in successfully!")
-            st.experimental_rerun()
+            #st.experimental_rerun()
         else:
             st.error("Invalid credentials.")
 
