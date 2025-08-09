@@ -11,7 +11,7 @@ import re
 # --- CONFIGURE GEMINI ---
 API_KEY = "AIzaSyDou_lfKmdoC19dqpolzGY6EY7eUskkgUI"
 genai.configure(api_key=API_KEY)
-gemini_model = genai.GenerativeModel("gemini-2.5-pro")
+gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
 # --- DB Connection ---
 def get_connection():
