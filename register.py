@@ -88,7 +88,10 @@ if menu == "Register":
     if st.button("Register"):
         if name and email and password:
             ok, msg = register_user(name, email, password)
-            st.success(str(msg)) if ok else st.error(str(msg))
+            if ok :
+                st.success(msg) 
+            else :
+                st.error(msg)
 
         else:
             st.warning("Fill in all fields.")
